@@ -1,0 +1,9 @@
+# Keep folder structure but ignore media files
+video/*
+audio/*
+!video/.gitkeep
+!audio/.gitkeep
+
+# PyCharm / IntelliJ project files
+.idea/
+*.iml
