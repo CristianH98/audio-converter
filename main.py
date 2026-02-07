@@ -4,40 +4,61 @@ import subprocess
 from pathlib import Path
 
 
-def require_ffmpeg():
-    if shutil.which("ffmpeg") is None:
-        raise SystemExit("ffmpeg not found on PATH. Install ffmpeg and try again.")
+def ensure_tools():
+    missing = []
+    for name in ("ffmpeg", "ffprobe"):
+        if shutil.which(name) is None:
+            missing.append(name)
+    if missing:
+        missing_list = ", ".join(missing)
+        raise SystemExit(f"Missing tools: {missing_list}. Install ffmpeg and try again.")
 
 
-def default_video_file(video_dir):
+def has_video_stream(path):
+    if not path.is_file() or path.name.startswith("."):
+        return False
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "csv=p=0",
+        str(path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0 and result.stdout.strip() == "video"
+
+
+def pick_input_path(video_dir, user_input):
+    if user_input:
+        if not user_input.exists():
+            raise SystemExit(f"Input file not found: {user_input}")
+        if not has_video_stream(user_input):
+            raise SystemExit(f"Input is not a video file: {user_input}")
+        print(f"Using input file: {user_input}")
+        return user_input
+
     if not video_dir.exists():
         raise SystemExit(f"Missing folder: {video_dir}")
-    files = sorted(p for p in video_dir.iterdir() if p.is_file())
-    if not files:
-        raise SystemExit(f"No video files found in: {video_dir}")
-    return files[0]
-
-
-def output_path_for(input_path, audio_dir, ext):
-    if not ext.startswith("."):
-        ext = f".{ext}"
-    return audio_dir / f"{input_path.stem}{ext}"
+    print(f"Scanning for video files in: {video_dir}")
+    for path in sorted(video_dir.iterdir()):
+        if has_video_stream(path):
+            print(f"Selected input file: {path}")
+            return path
+    raise SystemExit(f"No video files found in: {video_dir}")
 
 
 def convert(input_path, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(input_path),
-        "-vn",
-        "-acodec",
-        "libmp3lame",
-        "-q:a",
-        "2",
-        str(output_path),
-    ]
+    cmd = ["ffmpeg", "-y", "-i", str(input_path), "-vn"]
+    if output_path.suffix.lower() == ".mp3":
+        cmd += ["-q:a", "2"]
+    cmd.append(str(output_path))
+    print("Running ffmpeg...")
     subprocess.run(cmd, check=True)
 
 
@@ -63,10 +84,12 @@ def main():
     video_dir = project_root / "video"
     audio_dir = project_root / "audio"
 
-    input_path = args.input if args.input else default_video_file(video_dir)
-    output_path = output_path_for(input_path, audio_dir, args.ext)
+    ensure_tools()
+    input_path = pick_input_path(video_dir, args.input)
+    ext = args.ext.lstrip(".")
+    output_path = audio_dir / f"{input_path.stem}.{ext}"
 
-    require_ffmpeg()
+    print(f"Saving audio to: {output_path}")
     convert(input_path, output_path)
     print(f"Saved audio to: {output_path}")
     return 0
