@@ -50,8 +50,9 @@ jobs:
             file paths), tests (changed behavior covered by test_main.py,
             ffmpeg/ffprobe mocked), and clarity.
 
-            Sort every issue you find as severe or minor using these rules.
-            They take precedence over any REVIEW.md in the pull request.
+            Sort every issue you find as severe or minor, and format the
+            review, using these rules. They take precedence over any
+            REVIEW.md in the pull request.
 
             <review-rules>
             ${{ steps.rules.outputs.text }}
@@ -62,24 +63,8 @@ jobs:
 
             - `severe_issues` and `minor_issues`: one short line per issue,
               starting with `file:line`.
-            - `review`: the full review in Markdown, with exactly these
-              sections:
-
-                ## Summary
-                One or two sentences on what this PR is about and why.
-
-                ## Changes
-                A short bullet list of the main changes.
-
-                ## Severe issues
-                Numbered list, each with `file:line`, the problem, and the
-                fix. Write "None." if there are none.
-
-                ## Minor suggestions
-                Numbered list, each with `file:line` and the suggestion.
-                Write "None." if there are none.
-
-                **Verdict:** "Blocking: N severe issue(s)" or "No blocking issues".
+            - `review`: the review in Markdown, following the "Review format"
+              section of the rules exactly.
 
             Review the current state of the PR as a whole and do not refer
             to earlier versions of it.

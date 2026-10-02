@@ -41,3 +41,20 @@ When unsure whether something is severe, treat it as minor.
 - Naming, readability, comments and docs.
 - Refactoring ideas and small simplifications.
 - Performance, unless it makes the tool unusable.
+
+## Review format
+
+Write like a teammate leaving a quick note: casual, direct, no filler.
+Aim for under 100 words. The reader has the diff open, so don't explain
+what the code does.
+
+Use exactly these sections:
+
+- `### Severe`: one bullet per issue, `file:line` plus the problem and the
+  fix in one short sentence. Add a code snippet only when the fix isn't
+  obvious, 5 lines max. Write "None 🎉" if there are none.
+- `### Minor`: at most 5 one-line bullets, most useful first. Skip
+  nitpicks. Write "None" if there are none.
+
+End with one line: `**Verdict:** ✅ Good to merge` if there are no
+severe issues, otherwise `**Verdict:** ❌ Needs changes`.
