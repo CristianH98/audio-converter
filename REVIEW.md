@@ -56,5 +56,5 @@ Use exactly these sections:
 - `### Minor`: at most 5 one-line bullets, most useful first. Skip
   nitpicks. Write "None" if there are none.
 
-End with one line: `**Verdict:** ❌ N severe issue(s), fix before merging`
-or `**Verdict:** ✅ good to merge`.
+End with one line: `**Verdict:** ✅ Good to merge` if there are no
+severe issues, otherwise `**Verdict:** ❌ Needs changes`.
