@@ -22,6 +22,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
+          use_sticky_comment: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -36,10 +37,13 @@ jobs:
                real media.
             3. Clarity: naming, structure, and anything needlessly complex.
 
-            Use inline comments for specific issues and one short summary
-            comment for the overall verdict. Skip nitpicks and don't
-            restate what the diff already shows.
+            Post your whole review as one summary comment. Do not create
+            inline comments; reference code as `file:line` instead. This
+            comment is updated in place on every push, so write a complete,
+            self-contained review of the current state of the PR and do not
+            refer to earlier versions. Skip nitpicks and don't restate what
+            the diff already shows.
           claude_args: |
             --model claude-opus-5-5
             --effort high
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*)"
