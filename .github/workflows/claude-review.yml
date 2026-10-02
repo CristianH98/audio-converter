@@ -18,6 +18,7 @@ jobs:
           fetch-depth: 1
 
       - name: Review pull request
+        id: review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -26,27 +27,67 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Review this pull request for a small Python CLI that extracts
-            audio from video files with ffmpeg/ffprobe. Focus on:
+            audio from video files with ffmpeg/ffprobe. Look at correctness
+            (bugs, edge cases, error handling around subprocess calls and
+            file paths), tests (changed behavior covered by test_main.py,
+            ffmpeg/ffprobe mocked), and clarity.
 
-            1. Correctness: bugs, edge cases, and error handling around
-               subprocess calls and file paths.
-            2. Tests: whether changed behavior is covered by test_main.py,
-               and whether tests mock ffmpeg/ffprobe rather than needing
-               real media.
-            3. Clarity: naming, structure, and anything needlessly complex.
+            Sort every issue you find into one of two groups:
+            - Severe: must be fixed before merging. Bugs, crashes, wrong
+              output, data loss, security problems, or breaking existing
+              CLI behavior.
+            - Minor: worth considering but not blocking. Missing tests,
+              naming, readability, small simplifications.
+            Only call something severe if you are confident it is a real
+            problem. When in doubt, it is minor.
 
-            Post your whole review as one summary comment. Do not create
-            inline comments; reference code as `file:line` instead.
+            Post the review as one comment with exactly these sections:
 
-            Publish it with exactly this command, so the same comment is
-            edited on every push instead of a new one being added:
+              ## Summary
+              One or two sentences on what this PR is about and why.
+
+              ## Changes
+              A short bullet list of the main changes.
+
+              ## Severe issues
+              Numbered list, each with `file:line`, the problem, and the
+              fix. Write "None." if there are none.
+
+              ## Minor suggestions
+              Numbered list, each with `file:line` and the suggestion.
+              Write "None." if there are none.
+
+              **Verdict:** "Blocking: N severe issue(s)" or "No blocking issues".
+
+            Do not create inline comments. Publish the review with exactly
+            this command, so the same comment is edited on every push
+            instead of a new one being added:
               gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body "<review>"
             Never run `gh pr comment` without `--edit-last`.
 
-            Write a complete, self-contained review of the current state of
-            the PR and do not refer to earlier versions. Skip nitpicks and
-            don't restate what the diff already shows.
+            Review the current state of the PR as a whole and do not refer
+            to earlier versions of it.
+
+            Finally, return the same severe and minor issues as structured
+            output, one short line per issue starting with `file:line`.
           claude_args: |
             --model claude-opus-5-5
             --effort high
             --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --json-schema '{"type":"object","properties":{"severe_issues":{"type":"array","items":{"type":"string"}},"minor_issues":{"type":"array","items":{"type":"string"}}},"required":["severe_issues","minor_issues"]}'
+
+      - name: Block merge on severe issues
+        env:
+          RESULT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$RESULT" ]; then
+            echo "::warning::Claude returned no verdict, so this check does not block. See the review step log."
+            exit 0
+          fi
+          count=$(jq '.severe_issues | length' <<< "$RESULT")
+          if [ "$count" -gt 0 ]; then
+            echo "::error::Claude found $count severe issue(s). Fix them before merging."
+            jq -r '.severe_issues[] | "- " + .' <<< "$RESULT"
+            exit 1
+          fi
+          echo "No severe issues. Minor suggestions: $(jq '.minor_issues | length' <<< "$RESULT")"
