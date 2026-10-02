@@ -44,17 +44,18 @@ When unsure whether something is severe, treat it as minor.
 
 ## Review format
 
-Write like a teammate leaving a quick note: casual, direct, no filler.
-Aim for under 100 words. The reader has the diff open, so don't explain
-what the code does.
+Claude posts a short note, not a review of the whole PR. The PR description
+already says what the PR does, so don't summarize or describe the changes.
 
-Use exactly these sections:
+Write like a teammate: casual, direct, no filler, under 100 words.
 
-- `### Severe`: one bullet per issue, `file:line` plus the problem and the
-  fix in one short sentence. Add a code snippet only when the fix isn't
-  obvious, 5 lines max. Write "None 🎉" if there are none.
-- `### Minor`: at most 5 one-line bullets, most useful first. Skip
-  nitpicks. Write "None" if there are none.
+- If there are severe issues, add `### Severe` with one bullet per issue:
+  `file:line` plus the problem and the fix in one short sentence. Add a code
+  snippet only when the fix isn't obvious, 5 lines max.
+- If there are minor issues, add `### Minor` with at most 5 one-line
+  bullets, most useful first. Skip nitpicks.
+- Leave out any section that would be empty.
 
-End with one line: `**Verdict:** ✅ Good to merge` if there are no
-severe issues, otherwise `**Verdict:** ❌ Needs changes`.
+Always end with one line: `**Verdict:** ✅ Good to merge` when there are no
+severe issues, otherwise `**Verdict:** ❌ Needs changes`. When there are no
+issues at all, the verdict line is the whole comment.
