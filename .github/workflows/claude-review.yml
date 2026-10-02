@@ -35,7 +35,7 @@ jobs:
             echo 'RULES_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # Claude posts the review itself so it shows up as Claude, not a GitHub bot.
+      # Claude posts the comment itself so it shows up as Claude, not a GitHub bot.
       - name: Review pull request
         id: review
         uses: anthropics/claude-code-action@v1
@@ -59,30 +59,29 @@ jobs:
             ${{ steps.rules.outputs.text }}
             </review-rules>
 
-            Post the review once, as a comment review, with exactly this
-            command:
-              gh pr review ${{ github.event.pull_request.number }} --comment --body "<!-- claude-review -->
-              <review>"
-            Keep the `<!-- claude-review -->` line at the very top. Never use
-            `--approve` or `--request-changes`, and don't post anything else.
+            Write your comment, following the "Review format" section of the
+            rules exactly, to `claude-review.md` in the working directory.
+            Its first line must be `<!-- claude-review -->`. Then post it once
+            with exactly this command:
+              gh pr comment ${{ github.event.pull_request.number }} --body-file claude-review.md
+            Don't post anything else: no PR reviews and no other comments.
 
             Also return your result as structured output:
 
             - `severe_issues` and `minor_issues`: one short line per issue,
               starting with `file:line`.
-            - `review`: the review in Markdown, following the "Review format"
-              section of the rules exactly.
+            - `comment`: the comment you posted.
 
             Review the current state of the PR as a whole and do not refer
             to earlier versions of it.
           claude_args: |
             --model claude-opus-5-5
             --effort high
-            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
-            --json-schema '{"type":"object","properties":{"review":{"type":"string"},"severe_issues":{"type":"array","items":{"type":"string"}},"minor_issues":{"type":"array","items":{"type":"string"}}},"required":["review","severe_issues","minor_issues"]}'
+            --allowedTools "Write,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
+            --json-schema '{"type":"object","properties":{"comment":{"type":"string"},"severe_issues":{"type":"array","items":{"type":"string"}},"minor_issues":{"type":"array","items":{"type":"string"}}},"required":["comment","severe_issues","minor_issues"]}'
 
-      # Keeps Claude's newest review visible and hides older ones.
-      - name: Hide older reviews
+      # Keeps Claude's newest comment visible and hides older comments and reviews.
+      - name: Hide older Claude comments
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -90,25 +89,34 @@ jobs:
           STARTED: ${{ steps.rules.outputs.started }}
         run: |
           set -o pipefail
+          marker='<!-- claude-review -->'
+          ours='map(select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]")
+                           and ((.body // "") | contains($marker))))'
+
+          gh api --paginate "repos/$REPO/issues/$PR/comments" |
+            jq -s --arg marker "$marker" "add // [] | $ours" > "$RUNNER_TEMP/comments.json"
           gh api --paginate "repos/$REPO/pulls/$PR/reviews" |
-            jq -s 'add // [] | map(select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]")
-                                    and (.body | contains("<!-- claude-review -->"))))' > "$RUNNER_TEMP/reviews.json"
+            jq -s --arg marker "$marker" "add // [] | $ours" > "$RUNNER_TEMP/reviews.json"
 
           latest=$(jq -r --arg started "$STARTED" \
-            'map(select(.user.login == "claude[bot]" and .submitted_at >= $started)) | last | .id // empty' "$RUNNER_TEMP/reviews.json")
+            'map(select(.user.login == "claude[bot]" and .created_at >= $started)) | last | .id // empty' \
+            "$RUNNER_TEMP/comments.json")
           if [ -z "$latest" ]; then
-            echo "::warning::Claude didn't post a review in this run, so older reviews stay visible."
+            echo "::warning::Claude didn't post a comment in this run, so older ones stay visible."
             exit 0
           fi
 
-          jq -r --argjson latest "$latest" '.[] | select(.id != $latest) | .node_id' "$RUNNER_TEMP/reviews.json" |
+          {
+            jq -r --argjson latest "$latest" '.[] | select(.id != $latest) | .node_id' "$RUNNER_TEMP/comments.json"
+            jq -r '.[].node_id' "$RUNNER_TEMP/reviews.json"
+          } |
           while read -r node_id; do
             gh api graphql -f id="$node_id" -f query='
               mutation($id: ID!) {
                 minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
                   minimizedComment { isMinimized }
                 }
-              }' > /dev/null || echo "::warning::Could not hide old review $node_id"
+              }' > /dev/null || echo "::warning::Could not hide $node_id"
           done
 
       - name: Block merge on severe issues
