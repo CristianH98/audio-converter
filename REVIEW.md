@@ -44,18 +44,17 @@ When unsure whether something is severe, treat it as minor.
 
 ## Review format
 
-Keep the whole review under 200 words. The reader has the diff open, so
-don't explain what the code does or repeat it.
+Write like a teammate leaving a quick note: casual, direct, no filler.
+Aim for under 100 words. The reader has the diff open, so don't explain
+what the code does.
 
 Use exactly these sections:
 
-- `## Summary`: one sentence on what the PR does and why.
-- `## Changes`: at most 4 bullets, a few words each.
-- `## Severe issues`: one bullet per issue: `file:line`, the problem and
-  the fix, in one or two sentences. Add a code snippet only when the fix
-  isn't obvious, and keep it to 5 lines. Write "None." if there are none.
-- `## Minor suggestions`: at most 5 bullets, one line each, most useful
-  first. Leave out nitpicks. Write "None." if there are none.
+- `### Severe`: one bullet per issue, `file:line` plus the problem and the
+  fix in one short sentence. Add a code snippet only when the fix isn't
+  obvious, 5 lines max. Write "None 🎉" if there are none.
+- `### Minor`: at most 5 one-line bullets, most useful first. Skip
+  nitpicks. Write "None" if there are none.
 
-End with one line: `**Verdict:** Blocking: N severe issue(s)` or
-`**Verdict:** No blocking issues`.
+End with one line: `**Verdict:** ❌ N severe issue(s), fix before merging`
+or `**Verdict:** ✅ good to merge`.
