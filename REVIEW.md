@@ -41,3 +41,21 @@ When unsure whether something is severe, treat it as minor.
 - Naming, readability, comments and docs.
 - Refactoring ideas and small simplifications.
 - Performance, unless it makes the tool unusable.
+
+## Review format
+
+Keep the whole review under 200 words. The reader has the diff open, so
+don't explain what the code does or repeat it.
+
+Use exactly these sections:
+
+- `## Summary`: one sentence on what the PR does and why.
+- `## Changes`: at most 4 bullets, a few words each.
+- `## Severe issues`: one bullet per issue: `file:line`, the problem and
+  the fix, in one or two sentences. Add a code snippet only when the fix
+  isn't obvious, and keep it to 5 lines. Write "None." if there are none.
+- `## Minor suggestions`: at most 5 bullets, one line each, most useful
+  first. Leave out nitpicks. Write "None." if there are none.
+
+End with one line: `**Verdict:** Blocking: N severe issue(s)` or
+`**Verdict:** No blocking issues`.
