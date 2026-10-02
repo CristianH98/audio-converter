@@ -26,6 +26,7 @@ jobs:
       - name: Load review rules from main
         id: rules
         run: |
+          echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           git fetch --depth=1 origin main
           git show FETCH_HEAD:REVIEW.md > "$RUNNER_TEMP/rules.md" 2>/dev/null || cp REVIEW.md "$RUNNER_TEMP/rules.md"
           {
@@ -34,7 +35,7 @@ jobs:
             echo 'RULES_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # Claude only reads the PR. Posting and gating happen in the steps below.
+      # Claude posts the review itself so it shows up as Claude, not a GitHub bot.
       - name: Review pull request
         id: review
         uses: anthropics/claude-code-action@v1
@@ -58,8 +59,14 @@ jobs:
             ${{ steps.rules.outputs.text }}
             </review-rules>
 
-            Do not post anything to GitHub. Return your result as structured
-            output:
+            Post the review once, as a comment review, with exactly this
+            command:
+              gh pr review ${{ github.event.pull_request.number }} --comment --body "<!-- claude-review -->
+              <review>"
+            Keep the `<!-- claude-review -->` line at the very top. Never use
+            `--approve` or `--request-changes`, and don't post anything else.
+
+            Also return your result as structured output:
 
             - `severe_issues` and `minor_issues`: one short line per issue,
               starting with `file:line`.
@@ -71,27 +78,30 @@ jobs:
           claude_args: |
             --model claude-opus-5-5
             --effort high
-            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
             --json-schema '{"type":"object","properties":{"review":{"type":"string"},"severe_issues":{"type":"array","items":{"type":"string"}},"minor_issues":{"type":"array","items":{"type":"string"}}},"required":["review","severe_issues","minor_issues"]}'
 
-      # Posts a new "Comment" review, then hides older ones so only the latest shows.
-      - name: Post review
-        if: steps.review.outputs.structured_output != ''
+      # Keeps Claude's newest review visible and hides older ones.
+      - name: Hide older reviews
         env:
           GH_TOKEN: ${{ github.token }}
-          RESULT: ${{ steps.review.outputs.structured_output }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          STARTED: ${{ steps.rules.outputs.started }}
         run: |
           set -o pipefail
-          marker='<!-- claude-review -->'
-          new_id=$(jq --arg marker "$marker" '{event: "COMMENT", body: ($marker + "\n" + .review)}' <<< "$RESULT" |
-            gh api "repos/$REPO/pulls/$PR/reviews" --input - --jq .id)
-
           gh api --paginate "repos/$REPO/pulls/$PR/reviews" |
-            jq -r --arg marker "$marker" --argjson new "$new_id" '.[]
-              | select(.user.login == "github-actions[bot]" and .id != $new and (.body | contains($marker)))
-              | .node_id' |
+            jq -s 'add // [] | map(select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]")
+                                    and (.body | contains("<!-- claude-review -->"))))' > "$RUNNER_TEMP/reviews.json"
+
+          latest=$(jq -r --arg started "$STARTED" \
+            'map(select(.user.login == "claude[bot]" and .submitted_at >= $started)) | last | .id // empty' "$RUNNER_TEMP/reviews.json")
+          if [ -z "$latest" ]; then
+            echo "::warning::Claude didn't post a review in this run, so older reviews stay visible."
+            exit 0
+          fi
+
+          jq -r --argjson latest "$latest" '.[] | select(.id != $latest) | .node_id' "$RUNNER_TEMP/reviews.json" |
           while read -r node_id; do
             gh api graphql -f id="$node_id" -f query='
               mutation($id: ID!) {
