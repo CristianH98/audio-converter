@@ -7,3 +7,6 @@ audio/*
 # PyCharm / IntelliJ project files
 .idea/
 *.iml
+
+# macOS Finder metadata
+.DS_Store
