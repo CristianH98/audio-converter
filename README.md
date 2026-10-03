@@ -18,7 +18,7 @@ The script has no Python dependencies outside the standard library.
    python3 main.py
    ```
 
-The script picks the first video in `video/`, sorted by file name. It skips hidden files and any file that `ffprobe` doesn't recognize as video. The audio is saved to `audio/` with the same name as the video, for example `video/clip.mp4` becomes `audio/clip.mp3`. An existing file with that name is overwritten.
+The script picks the first video in `video/`, sorted by file name. It skips hidden files, images, audio files (even with cover art), and anything else that `ffprobe` doesn't recognize as video. The audio is saved to `audio/` with the same name as the video, for example `video/clip.mp4` becomes `audio/clip.mp3`. An existing file with that name is overwritten.
 
 Git ignores the contents of `video/` and `audio/`, so your media files are never committed.
 

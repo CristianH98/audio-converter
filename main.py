@@ -1,4 +1,5 @@
 import argparse
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -40,13 +41,35 @@ def has_video_stream(path):
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=codec_type",
+        "stream=codec_type:stream_disposition=attached_pic:format=format_name",
         "-of",
-        "csv=p=0",
+        "json",
         str(path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode == 0 and result.stdout.strip() == "video"
+    if result.returncode != 0:
+        return False
+    try:
+        probe = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return is_real_video(probe)
+
+
+def is_real_video(probe):
+    """Whether ffprobe's JSON output describes a video, not a still image or cover art.
+
+    ffprobe reports images and the cover art inside audio files as video
+    streams too, so those are ruled out separately.
+    """
+    streams = probe.get("streams") or []
+    if not streams or streams[0].get("codec_type") != "video":
+        return False
+    if streams[0].get("disposition", {}).get("attached_pic"):
+        return False
+    # Still images are read by the image2 demuxer or one of the *_pipe ones.
+    format_name = probe.get("format", {}).get("format_name", "")
+    return format_name != "image2" and not format_name.endswith("_pipe")
 
 
 def is_video_file(path):

@@ -1,3 +1,5 @@
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,40 +8,52 @@ from unittest import mock
 import main
 
 
+class TempDirTestCase(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def touch(self, name):
+        path = self.dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+        return path
+
+
 class OutputPathTest(unittest.TestCase):
-    def test_uses_input_stem_and_ext(self):
-        path = main.output_path_for(Path("video/clip.mp4"), Path("audio"), "m4a")
-        self.assertEqual(path, Path("audio/clip.m4a"))
-
-    def test_strips_leading_dot_from_ext(self):
-        path = main.output_path_for(Path("clip.mp4"), Path("audio"), ".mp3")
-        self.assertEqual(path, Path("audio/clip.mp3"))
-
-    def test_rejects_ext_with_path_separator(self):
-        for ext in ("mp3/../../x", "..\\x"):
+    def test_valid_extensions(self):
+        cases = {
+            "mp3": "audio/clip.mp3",
+            ".mp3": "audio/clip.mp3",
+            "m4a": "audio/clip.m4a",
+            "wav": "audio/clip.wav",
+        }
+        for ext, expected in cases.items():
             with self.subTest(ext=ext):
-                with self.assertRaisesRegex(main.ConversionError, "Invalid audio extension"):
-                    main.output_path_for(Path("clip.mp4"), Path("audio"), ext)
+                path = main.output_path_for(Path("video/clip.mp4"), Path("audio"), ext)
+                self.assertEqual(path, Path(expected))
 
-    def test_rejects_empty_ext(self):
-        for ext in ("", "."):
+    def test_invalid_extensions(self):
+        for ext in ("", ".", "mp3/../../x", "..\\x"):
             with self.subTest(ext=ext):
                 with self.assertRaisesRegex(main.ConversionError, "Invalid audio extension"):
                     main.output_path_for(Path("clip.mp4"), Path("audio"), ext)
 
 
 class BuildCommandTest(unittest.TestCase):
-    def test_mp3_adds_quality_flag(self):
-        cmd = main.build_ffmpeg_command(Path("in.mp4"), Path("out.mp3"))
-        self.assertEqual(cmd, ["ffmpeg", "-y", "-i", "in.mp4", "-vn", "-q:a", "2", "out.mp3"])
-
-    def test_mp3_match_is_case_insensitive(self):
-        cmd = main.build_ffmpeg_command(Path("in.mp4"), Path("out.MP3"))
-        self.assertIn("-q:a", cmd)
-
-    def test_other_formats_have_no_extra_flags(self):
-        cmd = main.build_ffmpeg_command(Path("in.mp4"), Path("out.wav"))
-        self.assertEqual(cmd, ["ffmpeg", "-y", "-i", "in.mp4", "-vn", "out.wav"])
+    def test_extra_args_per_format(self):
+        cases = {
+            "out.mp3": ["-q:a", "2"],
+            "out.MP3": ["-q:a", "2"],
+            "out.m4a": [],
+            "out.wav": [],
+            "out.flac": [],
+        }
+        for name, extra in cases.items():
+            with self.subTest(output=name):
+                cmd = main.build_ffmpeg_command(Path("in.mp4"), Path(name))
+                self.assertEqual(cmd, ["ffmpeg", "-y", "-i", "in.mp4", "-vn", *extra, name])
 
 
 class EnsureToolsTest(unittest.TestCase):
@@ -53,17 +67,43 @@ class EnsureToolsTest(unittest.TestCase):
             main.ensure_tools()
 
 
-class InputSelectionTest(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+def probe(format_name, codec_type="video", attached_pic=0):
+    """ffprobe's JSON output for a file whose first video stream has these properties."""
+    streams = []
+    if codec_type:
+        streams.append({"codec_type": codec_type, "disposition": {"attached_pic": attached_pic}})
+    return {"streams": streams, "format": {"format_name": format_name}}
 
-    def touch(self, name):
-        path = self.dir / name
-        path.write_bytes(b"")
-        return path
 
+class HasVideoStreamTest(unittest.TestCase):
+    def test_real_video_detection(self):
+        # Shapes taken from real ffprobe output for each kind of file.
+        cases = {
+            "mp4 video": (probe("mov,mp4,m4a,3gp,3g2,mj2"), True),
+            "animated gif": (probe("gif"), True),
+            "png image": (probe("png_pipe"), False),
+            "jpeg image": (probe("image2"), False),
+            "mp3 with cover art": (probe("mp3", attached_pic=1), False),
+            "mp3 without cover art": (probe("mp3", codec_type=None), False),
+        }
+        for name, (output, expected) in cases.items():
+            with self.subTest(file=name):
+                result = subprocess.CompletedProcess([], 0, stdout=json.dumps(output))
+                with mock.patch("main.subprocess.run", return_value=result):
+                    self.assertIs(main.has_video_stream(Path("file")), expected)
+
+    def test_ffprobe_failure_is_not_video(self):
+        result = subprocess.CompletedProcess([], 1, stdout="")
+        with mock.patch("main.subprocess.run", return_value=result):
+            self.assertFalse(main.has_video_stream(Path("broken.mp4")))
+
+    def test_unreadable_output_is_not_video(self):
+        result = subprocess.CompletedProcess([], 0, stdout="not json")
+        with mock.patch("main.subprocess.run", return_value=result):
+            self.assertFalse(main.has_video_stream(Path("odd.mp4")))
+
+
+class InputSelectionTest(TempDirTestCase):
     def test_validate_input_missing_file(self):
         with self.assertRaisesRegex(main.ConversionError, "Input file not found"):
             main.validate_input(self.dir / "nope.mp4")
@@ -110,11 +150,10 @@ class InputSelectionTest(unittest.TestCase):
             self.assertEqual(main.find_first_video(self.dir), wanted)
 
 
-class ConvertTest(unittest.TestCase):
+class ConvertTest(TempDirTestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.output = Path(tmp.name) / "audio" / "clip.mp3"
+        super().setUp()
+        self.output = self.dir / "audio" / "clip.mp3"
 
     def test_creates_output_dir_and_runs_ffmpeg(self):
         with mock.patch("main.subprocess.run") as run:
@@ -125,64 +164,56 @@ class ConvertTest(unittest.TestCase):
         )
 
     def test_ffmpeg_failure_becomes_conversion_error(self):
-        failure = main.subprocess.CalledProcessError(1, ["ffmpeg"])
+        failure = subprocess.CalledProcessError(1, ["ffmpeg"])
         with mock.patch("main.subprocess.run", side_effect=failure):
             with self.assertRaisesRegex(main.ConversionError, r"ffmpeg failed \(exit code 1\)"):
                 main.convert(Path("clip.mp4"), self.output)
 
 
-class MainTest(unittest.TestCase):
+class MainTest(TempDirTestCase):
+    """End-to-end runs of main() with the tools present and every file treated as video."""
+
+    def setUp(self):
+        super().setUp()
+        self.video_dir = self.dir / "video"
+        self.audio_dir = self.dir / "audio"
+        self.video_dir.mkdir()
+        for patcher in (
+            mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
+            mock.patch("main.has_video_stream", return_value=True),
+            mock.patch("main.VIDEO_DIR", self.video_dir),
+            mock.patch("main.AUDIO_DIR", self.audio_dir),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_default_ext_is_mp3(self):
+        self.assertEqual(main.parse_args([]).ext, "mp3")
+
+    def test_default_input_comes_from_video_dir(self):
+        clip = self.touch("video/clip.mp4")
+        with mock.patch("main.convert") as convert:
+            self.assertEqual(main.main([]), 0)
+        convert.assert_called_once_with(clip, self.audio_dir / "clip.mp3")
+
+    def test_explicit_input_is_converted(self):
+        clip = self.touch("elsewhere/clip.mp4")
+        with mock.patch("main.convert") as convert:
+            self.assertEqual(main.main(["-i", str(clip), "-e", "wav"]), 0)
+        convert.assert_called_once_with(clip, self.audio_dir / "clip.wav")
+
     def test_conversion_error_becomes_exit_message(self):
         with mock.patch("main.shutil.which", return_value=None):
             with self.assertRaises(SystemExit) as ctx:
                 main.main([])
         self.assertIn("Missing tools", str(ctx.exception.code))
 
-    def test_default_ext_is_mp3(self):
-        self.assertEqual(main.parse_args([]).ext, "mp3")
-
-    def test_explicit_input_is_converted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            clip = Path(tmp) / "clip.mp4"
-            clip.write_bytes(b"")
-            with (
-                mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
-                mock.patch("main.has_video_stream", return_value=True),
-                mock.patch("main.convert") as convert,
-            ):
-                self.assertEqual(main.main(["-i", str(clip), "-e", "wav"]), 0)
-        convert.assert_called_once_with(clip, main.AUDIO_DIR / "clip.wav")
-
-    def test_default_input_comes_from_video_dir(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            video_dir = Path(tmp) / "video"
-            audio_dir = Path(tmp) / "audio"
-            video_dir.mkdir()
-            clip = video_dir / "clip.mp4"
-            clip.write_bytes(b"")
-            with (
-                mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
-                mock.patch("main.has_video_stream", return_value=True),
-                mock.patch("main.VIDEO_DIR", video_dir),
-                mock.patch("main.AUDIO_DIR", audio_dir),
-                mock.patch("main.convert") as convert,
-            ):
-                self.assertEqual(main.main([]), 0)
-        convert.assert_called_once_with(clip, audio_dir / "clip.mp3")
-
     def test_ffmpeg_failure_exits_with_message(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            clip = Path(tmp) / "clip.mp4"
-            clip.write_bytes(b"")
-            failure = main.subprocess.CalledProcessError(1, ["ffmpeg"])
-            with (
-                mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
-                mock.patch("main.has_video_stream", return_value=True),
-                mock.patch("main.AUDIO_DIR", Path(tmp) / "audio"),
-                mock.patch("main.subprocess.run", side_effect=failure),
-            ):
-                with self.assertRaises(SystemExit) as ctx:
-                    main.main(["-i", str(clip)])
+        clip = self.touch("video/clip.mp4")
+        failure = subprocess.CalledProcessError(1, ["ffmpeg"])
+        with mock.patch("main.subprocess.run", side_effect=failure):
+            with self.assertRaises(SystemExit) as ctx:
+                main.main(["-i", str(clip)])
         self.assertIn("ffmpeg failed (exit code 1)", str(ctx.exception.code))
 
 
