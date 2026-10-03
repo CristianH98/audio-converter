@@ -94,6 +94,27 @@ class InputSelectionTest(unittest.TestCase):
             self.assertEqual(main.find_first_video(self.dir), wanted)
 
 
+class ConvertTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.output = Path(tmp.name) / "audio" / "clip.mp3"
+
+    def test_creates_output_dir_and_runs_ffmpeg(self):
+        with mock.patch("main.subprocess.run") as run:
+            main.convert(Path("clip.mp4"), self.output)
+        self.assertTrue(self.output.parent.is_dir())
+        run.assert_called_once_with(
+            main.build_ffmpeg_command(Path("clip.mp4"), self.output), check=True
+        )
+
+    def test_ffmpeg_failure_becomes_conversion_error(self):
+        failure = main.subprocess.CalledProcessError(1, ["ffmpeg"])
+        with mock.patch("main.subprocess.run", side_effect=failure):
+            with self.assertRaisesRegex(main.ConversionError, r"ffmpeg failed \(exit code 1\)"):
+                main.convert(Path("clip.mp4"), self.output)
+
+
 class MainTest(unittest.TestCase):
     def test_conversion_error_becomes_exit_message(self):
         with mock.patch("main.shutil.which", return_value=None):
@@ -115,6 +136,21 @@ class MainTest(unittest.TestCase):
             ):
                 self.assertEqual(main.main(["-i", str(clip), "-e", "wav"]), 0)
         convert.assert_called_once_with(clip, main.AUDIO_DIR / "clip.wav")
+
+    def test_ffmpeg_failure_exits_with_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clip = Path(tmp) / "clip.mp4"
+            clip.write_bytes(b"")
+            failure = main.subprocess.CalledProcessError(1, ["ffmpeg"])
+            with (
+                mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
+                mock.patch("main.has_video_stream", return_value=True),
+                mock.patch("main.AUDIO_DIR", Path(tmp) / "audio"),
+                mock.patch("main.subprocess.run", side_effect=failure),
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main.main(["-i", str(clip)])
+        self.assertIn("ffmpeg failed (exit code 1)", str(ctx.exception.code))
 
 
 if __name__ == "__main__":

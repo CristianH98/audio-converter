@@ -85,7 +85,12 @@ def build_ffmpeg_command(input_path, output_path):
 def convert(input_path, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     print("Running ffmpeg...")
-    subprocess.run(build_ffmpeg_command(input_path, output_path), check=True)
+    try:
+        subprocess.run(build_ffmpeg_command(input_path, output_path), check=True)
+    except subprocess.CalledProcessError as err:
+        raise ConversionError(
+            f"ffmpeg failed (exit code {err.returncode}) while converting {input_path}"
+        ) from err
 
 
 def parse_args(argv=None):
