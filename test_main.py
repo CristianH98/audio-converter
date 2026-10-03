@@ -15,6 +15,18 @@ class OutputPathTest(unittest.TestCase):
         path = main.output_path_for(Path("clip.mp4"), Path("audio"), ".mp3")
         self.assertEqual(path, Path("audio/clip.mp3"))
 
+    def test_rejects_ext_with_path_separator(self):
+        for ext in ("mp3/../../x", "..\\x"):
+            with self.subTest(ext=ext):
+                with self.assertRaisesRegex(main.ConversionError, "Invalid audio extension"):
+                    main.output_path_for(Path("clip.mp4"), Path("audio"), ext)
+
+    def test_rejects_empty_ext(self):
+        for ext in ("", "."):
+            with self.subTest(ext=ext):
+                with self.assertRaisesRegex(main.ConversionError, "Invalid audio extension"):
+                    main.output_path_for(Path("clip.mp4"), Path("audio"), ext)
+
 
 class BuildCommandTest(unittest.TestCase):
     def test_mp3_adds_quality_flag(self):
@@ -85,6 +97,10 @@ class InputSelectionTest(unittest.TestCase):
         with self.assertRaisesRegex(main.ConversionError, "No video files found"):
             main.find_first_video(self.dir)
 
+    def test_find_first_video_rejects_a_file(self):
+        with self.assertRaisesRegex(main.ConversionError, "Missing folder"):
+            main.find_first_video(self.touch("video"))
+
     def test_find_first_video_skips_hidden_and_non_video_in_sorted_order(self):
         self.touch(".a.mp4")
         self.touch("b.txt")
@@ -136,6 +152,23 @@ class MainTest(unittest.TestCase):
             ):
                 self.assertEqual(main.main(["-i", str(clip), "-e", "wav"]), 0)
         convert.assert_called_once_with(clip, main.AUDIO_DIR / "clip.wav")
+
+    def test_default_input_comes_from_video_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            video_dir = Path(tmp) / "video"
+            audio_dir = Path(tmp) / "audio"
+            video_dir.mkdir()
+            clip = video_dir / "clip.mp4"
+            clip.write_bytes(b"")
+            with (
+                mock.patch("main.shutil.which", return_value="/usr/bin/tool"),
+                mock.patch("main.has_video_stream", return_value=True),
+                mock.patch("main.VIDEO_DIR", video_dir),
+                mock.patch("main.AUDIO_DIR", audio_dir),
+                mock.patch("main.convert") as convert,
+            ):
+                self.assertEqual(main.main([]), 0)
+        convert.assert_called_once_with(clip, audio_dir / "clip.mp3")
 
     def test_ffmpeg_failure_exits_with_message(self):
         with tempfile.TemporaryDirectory() as tmp:

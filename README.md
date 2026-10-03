@@ -46,7 +46,8 @@ If something goes wrong, the script prints one of these messages and exits with 
 | `Missing tools: NAMES. Install ffmpeg and try again.` | `ffmpeg`, `ffprobe`, or both aren't installed or aren't on your `PATH`. |
 | `Input file not found: PATH` | The `--input` path doesn't exist. |
 | `Input is not a video file: PATH` | The `--input` file is hidden, is a folder, or has no video stream. |
-| `Missing folder: PATH` | The `video/` folder doesn't exist. |
+| `Invalid audio extension: 'EXT'` | `--ext` is empty or contains `/` or `\`. |
+| `Missing folder: PATH` | The `video/` folder doesn't exist, or `video` is a file. |
 | `No video files found in: PATH` | `video/` has no video files. |
 | `ffmpeg failed (exit code N) while converting PATH` | ffmpeg couldn't convert the file. Its own output above the message says why. |
 

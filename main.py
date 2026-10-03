@@ -62,7 +62,7 @@ def validate_input(path):
 
 
 def find_first_video(video_dir):
-    if not video_dir.exists():
+    if not video_dir.is_dir():
         raise ConversionError(f"Missing folder: {video_dir}")
     print(f"Scanning for video files in: {video_dir}")
     for path in sorted(video_dir.iterdir()):
@@ -72,7 +72,11 @@ def find_first_video(video_dir):
 
 
 def output_path_for(input_path, audio_dir, ext):
-    return audio_dir / f"{input_path.stem}.{ext.lstrip('.')}"
+    suffix = ext.lstrip(".")
+    # A path separator in the extension would write outside audio_dir.
+    if not suffix or "/" in suffix or "\\" in suffix:
+        raise ConversionError(f"Invalid audio extension: {ext!r}")
+    return audio_dir / f"{input_path.stem}.{suffix}"
 
 
 def build_ffmpeg_command(input_path, output_path):
