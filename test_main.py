@@ -92,6 +92,27 @@ class HasVideoStreamTest(unittest.TestCase):
                 with mock.patch("main.subprocess.run", return_value=result):
                     self.assertIs(main.has_video_stream(Path("file")), expected)
 
+    def test_runs_ffprobe_with_json_output(self):
+        result = subprocess.CompletedProcess([], 0, stdout=json.dumps(probe("mp4")))
+        with mock.patch("main.subprocess.run", return_value=result) as run:
+            main.has_video_stream(Path("clip.mp4"))
+        run.assert_called_once_with(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_type:stream_disposition=attached_pic:format=format_name",
+                "-of",
+                "json",
+                "clip.mp4",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
     def test_ffprobe_failure_is_not_video(self):
         result = subprocess.CompletedProcess([], 1, stdout="")
         with mock.patch("main.subprocess.run", return_value=result):

@@ -4,7 +4,7 @@ A Python script that extracts the audio track from a video file with ffmpeg. It 
 
 ## Requirements
 
-- Python 3.10 or newer.
+- Python 3. CI runs the tests on the latest release.
 - ffmpeg, which includes `ffprobe`. On macOS, install it with `brew install ffmpeg`. On Debian or Ubuntu, use `sudo apt install ffmpeg`.
 
 The script has no Python dependencies outside the standard library.
