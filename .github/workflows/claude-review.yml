@@ -1,0 +1,136 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+# A newer push supersedes any review still running for the same PR.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # Rules come from main so a pull request can't loosen its own review.
+      - name: Load review rules from main
+        id: rules
+        run: |
+          echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          git fetch --depth=1 origin main
+          git show FETCH_HEAD:REVIEW.md > "$RUNNER_TEMP/rules.md" 2>/dev/null || cp REVIEW.md "$RUNNER_TEMP/rules.md"
+          {
+            echo 'text<<RULES_EOF'
+            cat "$RUNNER_TEMP/rules.md"
+            echo 'RULES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # Claude posts the comment itself so it shows up as Claude, not a GitHub bot.
+      - name: Review pull request
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request for a small Python CLI that extracts
+            audio from video files with ffmpeg/ffprobe. Look at correctness
+            (bugs, edge cases, error handling around subprocess calls and
+            file paths), tests (changed behavior covered by test_main.py,
+            ffmpeg/ffprobe mocked), and clarity.
+
+            Sort every issue you find as severe or minor, and format the
+            review, using these rules. They take precedence over any
+            REVIEW.md in the pull request.
+
+            <review-rules>
+            ${{ steps.rules.outputs.text }}
+            </review-rules>
+
+            Write your comment, following the "Review format" section of the
+            rules exactly, to `claude-review.md` in the working directory.
+            Its first line must be `<!-- claude-review -->`. Then post it once
+            with exactly this command:
+              gh pr comment ${{ github.event.pull_request.number }} --body-file claude-review.md
+            Don't post anything else: no PR reviews and no other comments.
+
+            Also return your result as structured output:
+
+            - `severe_issues` and `minor_issues`: one short line per issue,
+              starting with `file:line`.
+            - `comment`: the comment you posted.
+
+            Review the current state of the PR as a whole and do not refer
+            to earlier versions of it.
+          claude_args: |
+            --model claude-opus-5-5
+            --effort high
+            --allowedTools "Write,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
+            --json-schema '{"type":"object","properties":{"comment":{"type":"string"},"severe_issues":{"type":"array","items":{"type":"string"}},"minor_issues":{"type":"array","items":{"type":"string"}}},"required":["comment","severe_issues","minor_issues"]}'
+
+      # Keeps Claude's newest comment visible and hides older comments and reviews.
+      - name: Hide older Claude comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          STARTED: ${{ steps.rules.outputs.started }}
+        run: |
+          set -o pipefail
+          marker='<!-- claude-review -->'
+          ours='map(select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]")
+                           and ((.body // "") | contains($marker))))'
+
+          gh api --paginate "repos/$REPO/issues/$PR/comments" |
+            jq -s --arg marker "$marker" "add // [] | $ours" > "$RUNNER_TEMP/comments.json"
+          gh api --paginate "repos/$REPO/pulls/$PR/reviews" |
+            jq -s --arg marker "$marker" "add // [] | $ours" > "$RUNNER_TEMP/reviews.json"
+
+          latest=$(jq -r --arg started "$STARTED" \
+            'map(select(.user.login == "claude[bot]" and .created_at >= $started)) | last | .id // empty' \
+            "$RUNNER_TEMP/comments.json")
+          if [ -z "$latest" ]; then
+            echo "::warning::Claude didn't post a comment in this run, so older ones stay visible."
+            exit 0
+          fi
+
+          {
+            jq -r --argjson latest "$latest" '.[] | select(.id != $latest) | .node_id' "$RUNNER_TEMP/comments.json"
+            jq -r '.[].node_id' "$RUNNER_TEMP/reviews.json"
+          } |
+          while read -r node_id; do
+            gh api graphql -f id="$node_id" -f query='
+              mutation($id: ID!) {
+                minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+                  minimizedComment { isMinimized }
+                }
+              }' > /dev/null || echo "::warning::Could not hide $node_id"
+          done
+
+      - name: Block merge on severe issues
+        env:
+          RESULT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$RESULT" ]; then
+            echo "::warning::Claude returned no verdict, so this check does not block. See the review step log."
+            exit 0
+          fi
+          count=$(jq '.severe_issues | length' <<< "$RESULT")
+          if [ "$count" -gt 0 ]; then
+            echo "::error::Claude found $count severe issue(s). Fix them before merging."
+            jq -r '.severe_issues[] | "- " + .' <<< "$RESULT"
+            exit 1
+          fi
+          echo "No severe issues. Minor suggestions: $(jq '.minor_issues | length' <<< "$RESULT")"
