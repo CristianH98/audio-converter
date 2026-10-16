@@ -1,64 +1,45 @@
 # Audio converter
 
-A Python script that extracts the audio track from a video file with ffmpeg. It is handy for making custom iPhone ringtones and alarms from screen recordings or clips.
+Turn a video into an audio file with one command.
 
-## Requirements
+## The problem
 
-- Python 3. CI runs the tests on the latest release.
-- ffmpeg, which includes `ffprobe`. On macOS, install it with `brew install ffmpeg`. On Debian or Ubuntu, use `sudo apt install ffmpeg`.
+iPhone ringtones and alarms have to be audio files, but the sound you want is often inside a video: a screen recording, a clip from your camera roll, a downloaded video. Extracting it by hand means remembering ffmpeg flags every time. This script does it for you: drop the video in a folder, run one command, and get an MP3.
 
-The script has no Python dependencies outside the standard library.
+## Quick start
 
-## Convert a video
+Requires Python 3 and [ffmpeg](https://ffmpeg.org/) (`brew install ffmpeg` on macOS). No Python packages are needed.
 
-1. Copy the video into the `video/` folder.
-2. Run the script:
+```bash
+cp ~/Movies/clip.mp4 video/
+python3 main.py
+```
 
-   ```bash
-   python3 main.py
-   ```
+The audio is saved as `audio/clip.mp3`.
 
-The script picks the first video in `video/`, sorted by file name. It skips hidden files, images, audio files (even with cover art), and anything else that `ffprobe` doesn't recognize as video. The audio is saved to `audio/` with the same name as the video, for example `video/clip.mp4` becomes `audio/clip.mp3`. An existing file with that name is overwritten.
+To pick a file from anywhere and choose another format:
 
-Git ignores the contents of `video/` and `audio/`, so your media files are never committed.
-
-## Options
+```bash
+python3 main.py --input ~/Movies/clip.mov --ext m4a
+```
 
 | Option | Default | Description |
 |---|---|---|
-| `--input PATH`, `-i PATH` | First video in `video/` | Convert this file instead. It can be anywhere on disk. |
-| `--ext EXT`, `-e EXT` | `mp3` | Output format, as a file extension. ffmpeg picks the codec from it. |
+| `-i`, `--input PATH` | First video in `video/` | The video to convert. |
+| `-e`, `--ext EXT` | `mp3` | The output format. |
 
-MP3 output uses ffmpeg's variable bitrate quality setting `-q:a 2`. Other formats use ffmpeg's defaults for that format.
+## How it works
 
-To convert a specific file to M4A:
+1. Checks that `ffmpeg` and `ffprobe` are installed.
+2. Finds the input video. Without `--input`, it takes the first file in `video/` that `ffprobe` confirms is a real video, so images, audio files with cover art, and hidden files are skipped.
+3. Runs `ffmpeg -vn` to drop the video stream and saves the audio to `audio/`.
 
-```bash
-python3 main.py -i ~/Movies/clip.mov -e m4a
-```
+Every failure, such as a missing tool, a missing file, or an ffmpeg error, prints one clear message and exits with code 1.
 
-## Errors
-
-If something goes wrong, the script prints one of these messages and exits with code 1:
-
-| Message | Cause |
-|---|---|
-| `Missing tools: NAMES. Install ffmpeg and try again.` | `ffmpeg`, `ffprobe`, or both aren't installed or aren't on your `PATH`. |
-| `Input file not found: PATH` | The `--input` path doesn't exist. |
-| `Input is not a video file: PATH` | The `--input` file is hidden, is a folder, or has no video stream. |
-| `Invalid audio extension: 'EXT'` | `--ext` is empty or contains `/` or `\`. |
-| `Missing folder: PATH` | The `video/` folder doesn't exist, or `video` is a file. |
-| `No video files found in: PATH` | `video/` has no video files. |
-| `ffmpeg failed (exit code N) while converting PATH` | ffmpeg couldn't convert the file. Its own output above the message says why. |
-
-## Run the tests
+## Tests
 
 ```bash
 python3 -m unittest discover -v
 ```
 
-The tests mock `ffmpeg` and `ffprobe`, so they need neither ffmpeg nor real media files. GitHub Actions runs them on every pull request and on every push to `main`.
-
-## Pull requests
-
-Every pull request gets an automatic review from Claude, posted as a comment with severe and minor issues and a verdict. Any severe issue fails the required `review` check, which blocks the merge. [REVIEW.md](REVIEW.md) defines what counts as severe and how the comment is formatted.
+The tests mock ffmpeg and ffprobe, so they run without ffmpeg or media files. GitHub Actions runs them on every pull request and on every push to `main`. Pull requests also get an automated Claude code review, configured in [REVIEW.md](REVIEW.md).
